@@ -1,0 +1,178 @@
+import onedrivesdk
+from onedrivesdk.helpers import GetAuthCodeServer
+
+def authenticate(client_id,client_secret):
+    redirect_uri = "http://localhost:8080/"
+    client = onedrivesdk.get_default_client(client_id='00000000481695BB',
+                                            scopes=['wl.signin',
+                                                    'wl.offline_access',
+                                                    'onedrive.readwrite'])
+    auth_url = client.auth_provider.get_auth_url(redirect_uri)
+
+    # Block thread until we have the code
+    code = GetAuthCodeServer.get_auth_code(auth_url, redirect_uri)
+    # Finally, authenticate!
+    client.auth_provider.authenticate(code, redirect_uri, client_secret)
+    return client
+
+def ListShow(client, item_id):
+    print("0: UP")
+    items = client.item(id=item_id).children.get()
+    count = 0
+    for count, item in enumerate(items):
+        print("{} {}".format(count + 1, item.name if item.folder is None else "/" + item.name))
+
+def get_parent_id(client, item_id):
+    id = client.item(id=item_id).get().parent_reference.id
+    return id
+
+def cd(client,item_id):
+    selected = input("select")
+    selected = int(selected)
+    if selected == 0:
+        item_id = get_parent_id(client, item_id)
+    else:
+        items = client.item(id=item_id).children.get()
+        if items[selected-1].folder is None:
+            print("It's not a folder")
+            return
+        else:
+            item_id = items[selected-1].id
+    ListShow(client,item_id)
+
+#########################
+#重命名
+def rename(client, item_id):
+    new_name = input("Enter new name: ")
+    renamed_item = onedrivesdk.Item()
+    renamed_item.name = new_name
+    renamed_item.id = item_id
+    client.item(id=item_id).update(renamed_item)
+#删除(无论是文件还是文件夹，无论是空文件夹还是非空文件夹)
+def delete(client, item_id):
+    confirm = input("Confirm delete? Y/N: ")
+    if confirm == "Y" or confirm == 'y':
+        client.item(id=item_id).delete()
+#复制
+#item_id必须为文件夹id，为目标文件夹，copy_item_id为源文件（源文件夹）
+def paste(client, item_id, copy_item_id):
+    ref = onedrivesdk.ItemReference()
+    ref.id = item_id
+    copy_operation = client.item(id=copy_item_id).copy(parent_reference=ref).post()
+#copy_operation.item will return None until the copy has completed.
+#If you would like to block until the operation has been completed
+#and copy_operation.item is no longer None
+#copy_operation.poll_until_complete()'
+
+#剪切
+def cut(client,item_id, copy_item_id):
+    paste(client, item_id, copy_item_id)
+    delete(client, copy_item_id)
+#上传
+#returned_item = client.item(id='哪个目录下').children['上传之后文件叫什么'].upload('要上传的文件所在路径')
+#returned_item = client.item(id='root').children['bbb.txt'].upload('D:\\aaax.txt')
+#上传后的文件如果和原来已存在的文件同名，则覆盖原来的文件'
+def upload(client,item_id,new_name,where):
+    returned_item = client.item(id=item_id).children[new_name].upload(where)
+#print("{}".format(returned_item.name))
+#下载
+#client.item(id=id_of_file).download('D:\\xxx\\work.txt')
+#这里要注意：路径的work.txt是你下载后取的新名字
+#可以用相对路径，注意取新名字！！！
+def dowload(client, item_id, where):
+    index = input("choose a file")
+    index = int(index) - 1
+    folder = client.item(id=item_id).children.get()
+    file_id = folder[index].id
+    client.item(id=file_id).download(where)
+#创建文件夹
+def add_folder(client,item_id,name):
+    f = onedrivesdk.Folder()
+    i = onedrivesdk.Item()
+    i.name = name
+    i.folder = f
+    returned_item = client.item(id=item_id).children.add(i)
+#分享
+def get_sharing_link(client, item_id):
+    action = int(input("Type? 1:View 2:Edit... "))
+    permission = client.item(id=item_id).create_link("view" if action == 1 else "edit").post()
+    print("\n{}\n".format(permission.link.web_url))
+
+"""
+还未理解：
+1.Paging through a collection
+类似于只需要得到其中一部分
+#get the top three elements of root, leaving the next page for more elements
+collection = client.item(drive='me', id='root').children.request(top=3).get()
+#get the first item in the collection
+item = collection[0]
+#get the next page of three elements, if none exist, returns None
+collection2 = collection.next_page_request.get()
+
+2.Async operations
+For async operations, you create an asyncio.coroutine which implements asyncio.ascompleted, and execute it with loop.run\_until\_complete.
+import asyncio
+@asyncio.coroutine
+def run_gets(client):
+    coroutines = [client.drive('me').request().get_async() for i in range(3)]
+    for future in asyncio.as_completed(coroutines):
+        drive = yield from future
+        print(drive.id)
+loop = asyncio.get_event_loop()
+loop.run_until_complete(run_gets(client))
+
+3.Using a Proxy
+If you need to proxy your requests, you can use the helper class HttpProviderWithProxy.
+import onedrivesdk
+from onedrivesdk.helpers import http_provider_with_proxy
+proxy = {
+    'http': 'http://localhost:8888',
+    'https': 'https://localhost:8888'
+}
+http = http_provider_with_proxy.HttpProviderWithProxy(proxy, verify_ssl=True)
+auth = onedrivesdk.AuthProvider(http, my_client_id, ['onedrive.readwrite'])
+client = onedrivesdk.OneDriveClient(my_base_url, auth, http)
+All requests using that client will be proxied.
+"""
+#########################
+
+def main():
+    client = authenticate('00000000481695BB', "BqaTYqI0XI7wDKcnJ5i3MvLwGcVsaMVM")
+    item_id = "root"
+    #while True:
+    ListShow(client,item_id)
+    #cd(client,item_id)
+    #xxx = input("select")
+    #xxx = int(xxx)
+    items = client.item(id=item_id).children.get()
+    #ddd = items[xxx-1].id
+    #rename(client, ddd)
+    #rename(client,ddd)
+    #returned_item = client.item(id='root').children['bbb.txt'].upload('D:\\aaax.txt')
+    #print("{}".format(returned_item.name))
+    #root_folder = client.item(id='root').children.get()
+    #id_of_file = root_folder[3].id
+    #client.item(id=id_of_file).download(r'D:\\xxx\\work.txt')
+    #add_folder(client, item_id, 'new')
+    copy_item_id = items[4].id
+    #paste(client, item_id, copy_item_id)
+    #ref = onedrivesdk.ItemReference()
+    #ref.id =items[2].id  # path also supported
+
+    #copy_operation = client.item(id=copy_item_id).copy(parent_reference=ref).post()
+    #paste(client,items[2].id,copy_item_id)
+    #cut(client, items[2].id, copy_item_id)
+    #get_sharing_link(client, copy_item_id)
+    #collection = client.item(id='root').children.request(top=3).get()
+    #print("{}".format(collection[0].name))
+    download_id = input("which one to download")
+    download_id = int(download_id)
+    items = client.item(id=item_id).children.get()
+    download_id = items[download_id - 1].id
+    item = items[1]
+    print("{}".format(item.name))
+    #print(items[download_id - 1].name)
+    #where = "d:\\myonedrive\\" + items[download_id].name
+    #client.item(id=download_id).download(where)
+
+main()
