@@ -1,0 +1,164 @@
+from os.path import basename
+import onedrivesdk
+from onedrivesdk.helpers import GetAuthCodeServer
+import re
+
+def authenticate(client_id, client_secret):
+    redirect_uri = "http://localhost:8080/"
+    client = onedrivesdk.get_default_client(client_id=client_id,
+                                            scopes=['wl.signin',
+                                                    'wl.offline_access',
+                                                    'onedrive.readwrite'])
+    auth_url = client.auth_provider.get_auth_url(redirect_uri)
+    # Block thread until we have the code
+    code = GetAuthCodeServer.get_auth_code(auth_url, redirect_uri)
+    # Finally, authenticate!
+    client.auth_provider.authenticate(code, redirect_uri, client_secret)
+    return client
+
+def ListShow(client, item_id):
+    print("0: UP")
+    items = client.item(id=item_id).children.get()
+    count = 0
+    for count, item in enumerate(items):
+        print("{} {}".format(count + 1, item.name if item.folder is None else "/" + item.name))
+
+def get_parent_id(client, item_id):
+    id = client.item(id=item_id).get().parent_reference.id
+    return id
+
+def cd(client, item_id):
+    selected = int(input("select"))
+    if selected == 0:
+		if item_id == 'root':
+			return 'root'
+        else:
+			item_id = get_parent_id(client, item_id)
+    else:
+        items = client.item(id=item_id).children.get()
+        if items[selected - 1].folder is None:
+            print("It's not a folder")
+            return
+        else:
+            item_id = items[selected - 1].id
+    return item_id
+
+def rename(client, item_id):
+    ListShow(client, item_id)
+    items = client.item(id=item_id).children.get()
+    rename_id = int(input("which one to rename"))
+    rename_id = items[rename_id - 1].id
+    new_name = input("Enter new name: ")
+    renamed_item = onedrivesdk.Item()
+    renamed_item.name = new_name
+    renamed_item.id = rename_id
+    client.item(id=rename_id).update(renamed_item)
+
+def delete(client, item_id):
+    ListShow(client, item_id)
+    items = client.item(id=item_id).children.get()
+    delete_id = int(input("which one to delete"))
+    delete_id = items[delete_id-1].id
+    confirm = input("Confirm delete? Y/N: ")
+    if confirm == "Y" or confirm == 'y':
+        client.item(id=delete_id).delete()
+
+def paste(client, item_id, copy_item_id):
+    ref = onedrivesdk.ItemReference()
+    ref.id = item_id
+    copy_operation = client.item(id=copy_item_id).copy(parent_reference=ref).post()
+
+def cut(client, item_id, copy_item_id):
+    paste(client, item_id, copy_item_id)
+    delete(client, copy_item_id)
+
+def upload(client, item_id):
+    while True:
+        upload_id = input("where to save?")
+        if upload_id == ".":
+            upload_id = item_id
+        else:
+            upload_id = int(upload_id) - 1
+            items = client.item(id=item_id).children.get()
+            if items[upload_id].folder is None:
+                print("It's not a folder")
+                continue
+            upload_id = items[upload_id].id
+        break
+
+    where = input("input file's path:")
+    name = basename(where)
+    returned_item = client.item(id=upload_id).children[name].upload(where)
+
+def download(client,item_id):
+    download_id = input("which one to download")
+    download_id = int(download_id) - 1
+    items = client.item(id=item_id).children.get()
+    download_item = items[download_id]
+    print(items[download_id].name)
+    download_id = items[download_id].id
+    name = "{}".format(download_item.name)
+    where = "D:\\myonedrive\\" + name
+    print(where)
+    client.item(id=download_id).download(where)
+
+def add_folder(client, item_id):
+    name = input("new folder name:")
+    f = onedrivesdk.Folder()
+    i = onedrivesdk.Item()
+    i.name = name
+    i.folder = f
+    returned_item = client.item(id=item_id).children.add(i)
+
+def get_sharing_link(client, item_id):
+    action = int(input("Type? 1:View 2:Edit... "))
+    permission = client.item(id=item_id).create_link("view" if action == 1 else "edit").post()
+    print("\n{}\n".format(permission.link.web_url))
+	
+def search(client, item_id, name):
+#    items = client.item(id=item_id).children.get()
+#    search_name = re.compile("*"+name+"*")
+#    for item in items:
+    return
+
+def main():
+    client = authenticate('00000000481695BB', "BqaTYqI0XI7wDKcnJ5i3MvLwGcVsaMVM")
+    item_id = "root"
+    copy_source = None
+    #actions = [ 'ls','cd','rm','mkdir','cc','cv','rename','download','upload','find']
+    while True:
+        print("oneDrive:", end="")
+        choice = input()
+        if choice == 'ls':
+            ListShow(client,item_id)
+        elif choice == 'cd':
+            item_id = cd(client,item_id)
+        elif choice == 'rm':
+            delete(client,item_id)
+        elif choice == 'mkdir':
+            add_folder(client,item_id)
+        elif choice == 'cc':
+            copy_source = int(input("which one to copy"))
+            items = client.item(id=item_id).children.get()
+            copy_source = items[copy_source-1].id
+        elif choice == 'cp':
+            if copy_source is None:
+                print("no copy source file, please select first")
+                continue
+            item = client.item(id=item_id).get()
+            if item.folder is not None:
+                paste(client,item_id,copy_source)
+            copy_source = None
+        elif choice == 'rename':
+            rename(client,item_id)
+        elif choice == 'download':
+            download(client,item_id)
+        elif choice == 'upload':
+            upload(client,item_id)
+        elif choice == 'find':
+            break
+        else:
+            print("please input right action")
+
+
+main()
